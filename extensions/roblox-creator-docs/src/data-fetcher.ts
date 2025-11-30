@@ -20,12 +20,13 @@ export interface DocItem {
     | "reference"
     | "enum"
     | "global"
+    | "datatype"
     | "property"
     | "method"
     | "event"
     | "callback"
     | "function";
-  // Removed: keywords (generated on-the-fly), content (use URL), metadata (use URL)
+  signature?: string; // For methods/functions: "(param: Type, ...) → ReturnType"
 }
 
 // Constants
@@ -57,6 +58,7 @@ interface FileMetadata {
     type: string;
     title: string;
     description?: string;
+    signature?: string;
   }>;
 }
 
@@ -116,6 +118,7 @@ interface SubitemData {
   type: string;
   title: string;
   description?: string;
+  signature?: string;
 }
 
 class RobloxDocsDataFetcher {
@@ -427,13 +430,28 @@ class RobloxDocsDataFetcher {
               title = item.name;
             }
 
-            const itemWithDescription = item as { summary?: string; description?: string };
+            const itemData = item as {
+              summary?: string;
+              description?: string;
+              parameters?: Array<{ name: string; type: string; summary?: string }>;
+              return_type?: string;
+            };
 
-            // Only store minimal data needed for list display
+            // Build signature for methods/functions/events/callbacks
+            // Store raw types - UI will resolve links based on available docs
+            let signature: string | undefined;
+            if (itemData.parameters && itemData.parameters.length > 0) {
+              const params = itemData.parameters.map((p) => `${p.name}: ${p.type}`).join(", ");
+              signature = `(${params})` + (itemData.return_type ? ` → ${itemData.return_type}` : "");
+            } else if (itemData.return_type) {
+              signature = `() → ${itemData.return_type}`;
+            }
+
             metadata.subitems!.push({
               type: key,
               title,
-              description: this.truncateDescription(itemWithDescription.summary || itemWithDescription.description),
+              description: this.truncateDescription(itemData.summary || itemData.description),
+              signature,
             });
           }
         }
@@ -449,8 +467,8 @@ class RobloxDocsDataFetcher {
   private truncateDescription(description: string | undefined): string {
     if (!description) return "";
 
-    // Limit description to 100 chars to reduce memory
-    const maxLength = 100;
+    // Limit description to 150 chars (enough for params + brief summary)
+    const maxLength = 150;
     if (description.length > maxLength) {
       return description.substring(0, maxLength) + "...";
     }
@@ -494,6 +512,7 @@ class RobloxDocsDataFetcher {
       url: `${baseUrl}#${anchorName}`,
       category: this.getCategoryFromPath(parentMetadata.path),
       type: SUBITEM_TYPE_MAP[subitem.type] || "reference",
+      signature: subitem.signature,
     };
   }
 
@@ -505,6 +524,7 @@ class RobloxDocsDataFetcher {
   private getCategoryFromPath(path: string): string {
     if (path.includes("/reference/engine/classes/")) return "Classes";
     if (path.includes("/reference/engine/enums/")) return "Enums";
+    if (path.includes("/reference/engine/datatypes/")) return "Datatypes";
     if (path.includes("/reference/engine/globals/")) return "Globals";
     if (path.includes("/tutorials/")) return "Tutorials";
     if (path.includes("/scripting/")) return "Scripting";
@@ -522,6 +542,7 @@ class RobloxDocsDataFetcher {
     if (metadata.type === "service") return "service";
     if (metadata.type === "enum") return "enum";
     if (metadata.type === "global") return "global";
+    if (metadata.path.includes("/reference/engine/datatypes/")) return "datatype";
     if (metadata.path.includes("/tutorials/")) return "tutorial";
     if (metadata.path.includes("/reference/")) return "reference";
     return "guide";
